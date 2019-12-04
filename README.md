@@ -1,5 +1,6 @@
 # TF2-albert-NER
 wrapping albert as keras model via bert-for-tf2, implementing NER task
+VAl Accuracy: 99%
 
 To use:
 1. modify the model_dir which contains the albert weight and config.json.
