@@ -2,13 +2,14 @@ import os
 import bert
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 from tensorflow import keras
 from vocab import TF2Tokenizer
 
 
 class TF2BertModel(keras.Model):
     def __init__(self, output_dim, max_seq_len=128,
-                 model_dir="models/albert_base_zh"):
+                 model_dir="models/albert_crf"):
         # settings
         super(TF2BertModel, self).__init__()
         self.output_dim = output_dim
@@ -17,6 +18,10 @@ class TF2BertModel(keras.Model):
         # layers
         self.initialize_bert()
         self.final_fc = keras.layers.Dense(self.output_dim)
+        # transition
+        initializer = tf.keras.initializers.GlorotUniform()
+        self._transition_params = tf.Variable(
+            initializer([output_dim, output_dim]), "transitions")
 
     @property
     def max_seq_len(self):
@@ -25,6 +30,14 @@ class TF2BertModel(keras.Model):
     @max_seq_len.setter
     def max_seq_len(self, seq_len):
         self._max_seq_len = seq_len
+
+    @property
+    def transition_params(self):
+        return self._transition_params
+
+    # @transition_params.setter
+    # def transition_params(self, tensor):
+    #     self.transition_params = tensor
 
     def initialize_bert(self):
         bert_params = bert.params_from_pretrained_ckpt(self.model_dir)
@@ -35,13 +48,8 @@ class TF2BertModel(keras.Model):
         :param x: (input token ids, attention masks)
         :return:
         """
-        # mask = input[:, 1]
-        # mask = tf.expand_dims(mask, 2)
-        # mask = tf.dtypes.cast(mask, tf.dtypes.float32)
         x = self.l_bert(input[:, 0], input[:, 1])
-        x = self.final_fc(x)
-        outs = tf.nn.softmax(x)
-        # outs = tf.nn.softmax(x) * mask
+        outs = self.final_fc(x)
         return outs
 
     def load_pretrained(self, pretrained_ckpt):

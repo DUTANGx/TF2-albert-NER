@@ -3,7 +3,7 @@ import tensorflow as tf
 from vocab import TF2Tokenizer
 from data_feed import read_corpus, batch_yield, single_yield
 from base_model import TF2BertModel
-from losses import masked_sparse_categorical_crossentropy
+from losses import MaskedSparseCategoricalCrossEntropy
 
 '''data'''
 train_corpus_path = 'data/train.txt'
@@ -15,7 +15,8 @@ output_dim = 9
 batch_size = 16
 max_seq_len = 128
 vocab = TF2Tokenizer()
-model_dir = 'models/alBERT_only_NER'
+# model_dir = 'models/alBERT_only_NER'
+model_dir = 'models/test'
 '''generator'''
 # train_data = read_corpus(train_corpus_path)
 # dev_data = read_corpus(dev_corpus_path)
@@ -46,7 +47,6 @@ with strategy.scope():
                          model_dir=model_dir)
     model.load_pretrained('models/albert_base_zh/albert_model.ckpt')
     # loss = MaskedSparseCategoricalCrossEntropy()
-    # loss = masked_sparse_categorical_crossentropy
     loss = 'sparse_categorical_crossentropy'
     model.compile(loss=loss,
                   optimizer=tf.keras.optimizers.Adam(LR), metrics=['accuracy'])
@@ -64,7 +64,7 @@ callbacks = [
                                          patience=3, min_lr=0.00001)
 ]
 
-model.fit(dataset_train, epochs=5,
+model.fit(dataset_train, epochs=100,
           steps_per_epoch=50658 // batch_size,
           callbacks=callbacks,
           validation_data=dataset_dev,
