@@ -1,6 +1,7 @@
 # TF2-albert-NER
 wrapping albert as keras model via bert-for-tf2, implementing NER task
 
+Features 2019-12-16: Added Bi-LSTM.
 Features 2019-12-10: Added CRF model training on multiple GPUs.
 
 To use:
