@@ -1,5 +1,5 @@
 # TF2-albert-NER
-wrapping albert as tfkeras model via bert-for-tf2, implemented NER task
+wrapping albert as tfkeras layer via bert-for-tf2(https://github.com/kpe/bert-for-tf2), implemented NER task
 
 F1 on MSRA: 95-99%. F1 on Boson: 80-85%.
 
