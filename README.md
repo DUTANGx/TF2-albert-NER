@@ -1,7 +1,7 @@
 # TF2-albert-NER
-wrapping albert as keras model via bert-for-tf2, implementing NER task
+wrapping albert as tfkeras model via bert-for-tf2, implemented NER task
 
-F1 on MSRA: 97%. F1 on Boson: 84%.
+F1 on MSRA: 95%. F1 on Boson: 84%.
 
 Features 2019-12-16: Added Bi-LSTM.
 
