@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
 from tqdm import tqdm
@@ -7,21 +8,28 @@ from data_feed import read_corpus, batch_yield, single_yield
 from crf_model import TF2BertModel
 from tf2viterbi import viterbi_decode
 
-''' DATA '''
-train_corpus_path = 'data/train.txt'
-dev_corpus_path = 'data/dev.txt'
-
 ''' CONFIGS '''
 FOLD = 20
 EPOCHS = 100
-LR = 0.0003
-output_dim = 9
+LR = 1e-6
 batch_size = 16
-max_seq_len = 128
-train_batches = 50658
-dev_batches = 4631
-# train_batches = 128
-# dev_batches = 128
+
+# if you want to train on MSRA
+# train_corpus_path = 'data/train.txt'
+# dev_corpus_path = 'data/dev.txt'
+# output_dim = 9
+# train_batches = 50658
+# dev_batches = 4631
+# max_seq_len = 128
+
+# if you want to train on BOSON
+train_corpus_path = 'data/Boson_train.json'
+dev_corpus_path = 'data/Boson_dev.json'
+output_dim = 15
+train_batches = 10845
+dev_batches = 571
+max_seq_len = 256
+
 vocab = TF2Tokenizer()
 model_dir = 'models/albert_crf'
 checkpoint_dir = os.path.join(model_dir, "training_checkpoints")
@@ -40,9 +48,6 @@ ds_dev = tf.data.Dataset.from_generator(single_yield,
                                         output_shapes=(
                                             [2, max_seq_len], [max_seq_len]))
 dataset_dev = ds_dev.repeat().batch(batch_size)
-
-strategy = tf.distribute.MirroredStrategy()
-print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
 
 ''' LOSS & METRICS '''
 
@@ -64,22 +69,23 @@ train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(
     name='train_accuracy')
 dev_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(
     name='dev_accuracy')
+train_F1 = tfa.metrics.F1Score(num_classes=output_dim, average='weighted')
+dev_F1 = tfa.metrics.F1Score(num_classes=output_dim, average='weighted')
 
 ''' MODEL '''
-# with strategy.scope():
 model = TF2BertModel(output_dim=output_dim, max_seq_len=max_seq_len,
                      model_dir=model_dir)
-model.load_pretrained('models/albert_tiny_zh/albert_model.ckpt')
-# model.summary()
+# model.load()
+model.load_pretrained('models/albert_base_zh/albert_model.ckpt')
+model.summary()
 optimizer = tf.keras.optimizers.Adam(LR)
 checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
 
 ''' TF TRAINING OPS '''
 
 
-# with strategy.scope():
 def predict_and_record(labels, predictions, real_len, trans_params,
-                       recorder, batch_size):
+                       recorders, batch_size):
     for i in range(batch_size):
         # viterbi_seq, _ = viterbi_decode(
         #     predictions[i, :real_len[i]],
@@ -89,9 +95,14 @@ def predict_and_record(labels, predictions, real_len, trans_params,
             trans_params)
         # print(labels[i, :real_len[i]], viterbi_seq)
         # print(tf.one_hot(viterbi_seq))
-        recorder.update_state(labels[i, :real_len[i]],
-                              tf.one_hot(viterbi_seq,
-                                         model.output_dim))
+        for recorder in recorders:
+            if isinstance(recorder, tf.keras.metrics.SparseCategoricalAccuracy):
+                recorder.update_state(labels[i, :real_len[i]],
+                                      tf.one_hot(viterbi_seq, model.output_dim))
+            elif isinstance(recorder, tfa.metrics.F1Score):
+                recorder.update_state(
+                    tf.one_hot(labels[i, :real_len[i]], model.output_dim),
+                    tf.one_hot(viterbi_seq, model.output_dim))
 
 
 def train_step(inputs, update_recorder=False):
@@ -100,13 +111,14 @@ def train_step(inputs, update_recorder=False):
     with tf.GradientTape() as tape:
         predictions = model(seq, training=True)
         loss, transition_params = compute_loss(labels, predictions, real_len,
-                                          model.transition_params)
+                                               model.transition_params)
 
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     if update_recorder:
-        predict_and_record(labels, predictions, real_len, model.transition_params,
-                           train_accuracy, batch_size)
+        predict_and_record(labels, predictions, real_len,
+                           model.transition_params,
+                           [train_accuracy, train_F1], batch_size)
     # train_accuracy.update_state(labels, tf.nn.softmax(predictions), seq[:, 1])
 
     return loss
@@ -120,28 +132,12 @@ def test_step(inputs):
                                       model.transition_params)
     dev_loss.update_state(loss)
     predict_and_record(labels, predictions, real_len, trans_params,
-                       dev_accuracy, batch_size)
+                       [dev_accuracy, dev_F1], batch_size)
     # dev_accuracy.update_state(labels, tf.nn.softmax(predictions),
     #                             seq[:, 1])
 
 
 ''' LOOP '''
-# with strategy.scope():
-#     # `experimental_run_v2` replicates the provided computation and runs it
-#     # with the distributed input.
-#     @tf.function
-#     def distributed_train_step(dataset_inputs):
-#         per_replica_losses = strategy.experimental_run_v2(train_step,
-#                                                           args=(
-#                                                               dataset_inputs,))
-#         return strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses,
-#                                axis=None)
-#
-#
-#     @tf.function
-#     def distributed_test_step(dataset_inputs):
-#         return strategy.experimental_run_v2(test_step, args=(dataset_inputs,))
-
 
 for epoch in range(EPOCHS):
     # print(model.transition_params)
@@ -154,12 +150,13 @@ for epoch in range(EPOCHS):
             total_loss += train_step(x, False)
             num_batches += 1
         for x in dataset_train.take(1):
-            total_loss += train_step(x,True)
+            total_loss += train_step(x, True)
             num_batches += 1
         train_loss = total_loss / num_batches
-        template = ("Loss: {}, Accuracy: {}%")
-        print(template.format(train_loss, train_accuracy.result() * 100))
-
+        template = ("Loss: {}, Accuracy: {}% F1: {}%")
+        print(template.format(train_loss,
+                              train_accuracy.result() * 100,
+                              train_F1.result()))
     # TEST LOOP
     for x in tqdm(dataset_dev.take(dev_batches // batch_size)):
         # distributed_test_step(x)
@@ -167,11 +164,14 @@ for epoch in range(EPOCHS):
 
     checkpoint.save(checkpoint_prefix)
 
-    template = ("Epoch {}, Loss: {}, Accuracy: {}%, Test Loss: {}, "
-                "Test Accuracy: {}%")
+    template = ("Epoch {}, Loss: {}, Accuracy: {}%, F1: {}% Test Loss: {}, "
+                "Test Accuracy: {}% TestF1: {}%")
     print(template.format(epoch + 1, train_loss,
-                          train_accuracy.result() * 100, dev_loss.result(),
-                          dev_accuracy.result() * 100))
+                          train_F1.result() * 100,
+                          train_accuracy.result() * 100,
+                          dev_loss.result(),
+                          dev_accuracy.result() * 100,
+                          dev_F1.result()))
 
     dev_loss.reset_states()
     train_accuracy.reset_states()
