@@ -2,9 +2,11 @@ import os
 import bert
 import numpy as np
 
+BASE = os.path.dirname(__file__)
+
 
 class TF2Tokenizer(object):
-    def __init__(self, model_dir="models/albert_base_zh"):
+    def __init__(self, model_dir=os.path.join(BASE, "models/albert_base_zh")):
         self.tokenizer = bert.albert_tokenization.FullTokenizer(
             os.path.join(model_dir, 'vocab.txt'))
 
@@ -32,3 +34,6 @@ class TF2Tokenizer(object):
         pred_token_ids = np.array(list(pred_token_ids))
         stacked = np.stack([pred_token_ids, attention_mask], axis=1)
         return stacked
+
+
+tokenizer = TF2Tokenizer()
